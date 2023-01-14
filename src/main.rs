@@ -1,28 +1,59 @@
 //! This example displays each contributor to the bevy source code as a bouncing bevy-ball.
 
+use std::f32::consts::E;
+
 use bevy::{prelude::*};
 use rand::{prelude::SliceRandom};
 
 use {core::f32::consts::PI};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
+
+mod game_menu;
+
+use game_menu::GameMenuPlugin;
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum AppState {
+    MainMenu,
+    InGame,
+    Restart,
+}
+
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_startup_system(setup)
-        .add_startup_system(setup_cards)
-        //.add_system(velocity_system)
-        //.add_system(move_system)
-        .add_system(select_card_system)
-        .add_system(cursor_state_system)
-        .add_system(clickable)
-        //.add_system(click_card_system)
-        .add_system(flip_card_system)
-        .add_system(destroy_cards_system)
-        //.add_system(display_cards)
-        .add_system(hoverable)
-        .add_system(move_card_system)
-        .add_startup_system(setup_players)
-        .add_system(select_player_system)
+    let mut app = App::new();
+
+        app.add_plugins(DefaultPlugins)
+        .add_plugin(GameMenuPlugin)
+        .add_startup_system(state_system)
+        // add the app state type
+        .add_state(AppState::MainMenu)
+        // systems to run only in the main menu
+        .add_system_set(
+            SystemSet::on_update(AppState::InGame)
+                .with_system(select_card_system)
+                .with_system(cursor_state_system)
+                .with_system(clickable_card)
+                .with_system(flip_card_system)
+                .with_system(destroy_cards_system)
+                .with_system(hoverable)
+                .with_system(move_card_system)
+                .with_system(select_player_system)
+                .with_system(check_board_state)
+        )
+
+        // setup when entering the state
+        .add_system_set(
+            SystemSet::on_enter(AppState::InGame)
+                .with_system(setup)
+                .with_system(setup_cards)
+                .with_system(setup_players)
+        )
+
+        // cleanup when exiting the state
+        .add_system_set(
+            SystemSet::on_exit(AppState::InGame)
+            .with_system(despawn_scene)
+                
+        )
         .run();
 }
 
@@ -51,6 +82,8 @@ struct RotateCard
     duration: f32,
 }
 
+#[derive(Component)]
+struct MainCamera;
 #[derive(Component)]
 struct Hoverable;
 #[derive(Component)]
@@ -115,21 +148,22 @@ const ALPHA: f32 = 1.0;
 
 const SHOWCASE_TIMER_SECS: f32 = 3.0;
 
-const CARD_ROWS: usize = 4;
-const CARD_COLS: usize = 3;
-
-const CARD_OFFSET_X: f32 = -450.0 + 100.0 * (10.0 - (CARD_COLS as f32)) * 0.5;
-const CARD_OFFSET_Y: f32 = -450.0 + 100.0 * (10.0 - (CARD_ROWS as f32)) * 0.5;
-
 const PLAYER_DISTANCE: f32 = 400.0;
 const PLAYER__HAND_DISTANCE: f32 = 80.0;
-
-const PLAYER_NUM: usize = 1;
-const PLAYER_RADIAL_DISTANCE: f32 = 2.0*PI / (PLAYER_NUM as f32);
 
 #[derive(Resource)]
 struct ImportedImagesFront {
     handles: Vec<Handle<Image>>,
+}
+
+#[derive(Resource)]
+struct BoardSize {
+    size: Vec2
+}
+
+#[derive(Resource)]
+struct NumberOfPlayers {
+    num: usize
 }
 
 #[derive(Resource)]
@@ -169,7 +203,33 @@ impl Clone for ImportedImageBack {
     }
 }
 
-fn setup_players(mut commands: Commands,asset_server:Res<AssetServer>)
+fn state_system(mut commands:Commands,mut app_state: ResMut<State<AppState>>) {
+    let num_of_players = NumberOfPlayers{num:1};
+    let board_size = BoardSize { size: Vec2::new(4.0,5.0) };
+    commands.insert_resource(num_of_players);
+    commands.insert_resource(board_size);
+    // match app_state.current()
+    // {
+    //     AppState::MainMenu =>
+    //     {
+    //         //app_state.pop();
+    //         //app_state.set(AppState::InGame).unwrap();
+    //     }
+    //     AppState::InGame =>
+    //     {
+            
+    //     }
+    //     AppState::Restart =>
+    //     {
+            
+    //     }
+    // }
+    // // ^ this can fail if we are already in the target state
+    // // or if another state change is already queued
+}
+
+
+fn setup_players(mut commands: Commands,asset_server:Res<AssetServer>, player_num:Res<NumberOfPlayers>)
 {
     let texture_handle=asset_server.load("icon1.png");
     let mut rng = rand::thread_rng();
@@ -186,13 +246,13 @@ fn setup_players(mut commands: Commands,asset_server:Res<AssetServer>)
         MemoryPlayer{colour:Color::rgb(0.2,0.7,0.7),
             index:4,collected_cards:0},
     ];
-    let mut player_vector : Vec<MemoryPlayer> =  player_array[0..PLAYER_NUM].to_vec();
+    let mut player_vector : Vec<MemoryPlayer> =  player_array[0..player_num.num].to_vec();
     player_vector.shuffle(&mut rng);
-    
-    let mut player_selection : CurrentPlayer = CurrentPlayer { order:Vec::with_capacity(PLAYER_NUM) } ;
-    for mut player in player_vector.iter_mut()
+    let player_radial_distance: f32 = 2.0*PI / (player_num.num as f32);
+    let mut player_selection : CurrentPlayer = CurrentPlayer { order:Vec::with_capacity(player_num.num) } ;
+    for player in player_vector.iter_mut()
     {
-        let rot = PLAYER_RADIAL_DISTANCE * player.index as f32;
+        let rot = player_radial_distance * player.index as f32;
         let pos = (rot.cos() * PLAYER_DISTANCE,rot.sin() * PLAYER_DISTANCE);
         let transform = Transform{translation:Vec3::new(pos.0, pos.1, 0.0),rotation:Quat::from_rotation_z(PI/2.0 +rot),scale:Vec3::new(1f32,1f32,1f32)};
         let entity = commands.spawn(
@@ -217,9 +277,41 @@ fn setup_players(mut commands: Commands,asset_server:Res<AssetServer>)
     commands.insert_resource(CurrentPlayerIndex{index:0,last_index:0,transition_time:0.0,transition_speed:0.4});
 }
 
-
-fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>)
+fn despawn_scene(mut commands: Commands,    
+    mut player_query: Query<Entity, With<MemoryPlayer>>, 
+    mut card_query: Query<Entity, With<Card>>,
+    mut cam_query: Query<Entity, With<MainCamera>>,
+    mut cur_query: Query<Entity, With<CursorState>>)
 {
+    for (ent) in player_query.iter()
+    {
+        commands.entity(ent).despawn_recursive();
+    }
+    for (ent) in card_query.iter()
+    {
+        commands.entity(ent).despawn_recursive();
+    }
+    for (ent) in cam_query.iter()
+    {
+        commands.entity(ent).despawn_recursive();
+    }
+    for (ent) in cur_query.iter()
+    {
+        commands.entity(ent).despawn_recursive();
+    }
+    commands.remove_resource::<CurrentPlayerIndex>();
+    commands.remove_resource::<ClickedCardIndex>();
+    commands.remove_resource::<CardToBeDestroyed>();
+    commands.remove_resource::<CardCount>();
+    //commands.remove_resource::<ImportedImagesFront>();
+    //commands.remove_resource::<ImportedImageBack>();
+    commands.remove_resource::<CurrentPlayer>();
+}
+
+fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size:Res<BoardSize>)
+{
+    let card_cols = board_size.size.x as usize;
+    let card_rows = board_size.size.y as usize;
     let mut rng = rand::thread_rng();
     let texture_handle = asset_server.load("rewersu.png");
     let mut available_images:[Handle<Image>; 21] = 
@@ -251,24 +343,26 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>)
             //asset_server.load("icon24.png"),
         ];
         available_images.shuffle(&mut rng);
-    let used_images:Vec<Handle<Image>> = available_images[0..(CARD_ROWS*CARD_COLS/2)].to_vec();
+    let used_images:Vec<Handle<Image>> = available_images[0..(card_rows*card_cols/2)].to_vec();
     let mut texture_handle_a:ImportedImagesFront = ImportedImagesFront{
         handles: used_images};
     let mut card_selection = CardSelection {
-        order: Vec::with_capacity(CARD_ROWS*CARD_COLS),
+        order: Vec::with_capacity(card_rows*card_cols),
     };
-    let clicked_card_index: ClickedCardIndex = ClickedCardIndex { index: CARD_ROWS*CARD_COLS };
-    let card_to_be_destroyed: CardToBeDestroyed = CardToBeDestroyed { index: CARD_ROWS*CARD_COLS };
+    let clicked_card_index: ClickedCardIndex = ClickedCardIndex { index: card_rows*card_cols };
+    let card_to_be_destroyed: CardToBeDestroyed = CardToBeDestroyed { index: card_rows*card_cols };
     let selected_cnt: CardCount = CardCount {count:0,};
-    let mut indexes_array: [usize; CARD_ROWS*CARD_COLS] = core::array::from_fn(|i| i);
+    let mut indexes_array: Vec<usize> = (0..card_rows*card_cols).collect();
+    //let mut indexes_array: [usize; card_rows*card_cols] = core::array::from_fn(|i| i);
     indexes_array.shuffle(&mut rng);
     let mut iter= 0;
-    for i in 0..CARD_COLS 
+    for i in 0..card_cols 
     {
-        for j in 0..CARD_ROWS
+        for j in 0..card_rows
         {
-            
-            let pos = (CARD_OFFSET_X + 100.0 * (i as f32), CARD_OFFSET_Y + 100.0 * (j as f32));
+            let card_offset_x: f32 = -450.0 + 100.0 * (10.0 - (card_cols as f32)) * 0.5;
+            let card_offset_y: f32 = -450.0 + 100.0 * (10.0 - (card_rows as f32)) * 0.5;
+            let pos = (card_offset_x + 100.0 * (i as f32), card_offset_y + 100.0 * (j as f32));
             let transform = Transform::from_xyz(pos.0, pos.1, 0.0);
             let hue = 0.0;//rng.gen_range(0.0..=360.0);
             
@@ -310,7 +404,7 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>)
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn((Camera2dBundle::default(),MainCamera));
     commands.spawn(CursorState{cursor_world:Vec2{x:0.0,y:0.0},cursor_moved:false});
 }
 
@@ -320,7 +414,12 @@ fn destroy_cards_system(mut commands: Commands,
     mut clicked_card_index:ResMut<ClickedCardIndex>,
     mut card_cnt: ResMut<CardCount>,
     mut player_index: ResMut<CurrentPlayerIndex>,
-    mut player_query: Query<(&mut MemoryPlayer)>) {
+    mut player_query: Query<(&mut MemoryPlayer)>,
+    mut app_state: ResMut<State<AppState>>,
+    board_size: Res<BoardSize>,
+    player_num:Res<NumberOfPlayers>
+) {
+    let board_size = board_size.size.x as usize * board_size.size.y as usize;
     for (entity,card,_,mut trans) in query.iter_mut()
     {
         if card.index == destroy_card_index.index
@@ -332,11 +431,12 @@ fn destroy_cards_system(mut commands: Commands,
             commands.entity(entity).remove::<Clickable>();
             commands.entity(entity).remove::<Hoverable>();
             commands.entity(entity).insert(Collected);
+            let player_radial_distance: f32 = 2.0*PI / (player_num.num as f32);
             for (mut player) in player_query.iter_mut()
             {
                 if player_index.index == player.index
                 {
-                    let mut helper_rot = PLAYER_RADIAL_DISTANCE * player.index as f32;
+                    let mut helper_rot = player_radial_distance * player.index as f32;
                     let mut target_pos = Vec3::new(helper_rot.cos() * (PLAYER_DISTANCE),helper_rot.sin() * PLAYER_DISTANCE,player.collected_cards as f32);
                     let rotation_offset = -(player.collected_cards as f32) * 0.18 + 1.0;
                     player.collected_cards += 1;
@@ -345,17 +445,17 @@ fn destroy_cards_system(mut commands: Commands,
                     let card_offset = Vec3::new(helper_rot.cos() * PLAYER__HAND_DISTANCE,helper_rot.sin() * PLAYER__HAND_DISTANCE,player.collected_cards as f32);
                     target_pos+=card_offset;
                     //target_trans.rotate(Quat::from_rotation_z(2.0));
-                    commands.entity(entity).insert(MovedCard{target_transl: target_pos,target_rot:target_rot,
+                    commands.entity(entity).insert(MovedCard{target_transl: target_pos,target_rot:target_rot + PI/2.0,
                         init_transform:trans.clone(),speed:1.0,progression:0.0});
                 }
             }
             
             
             //commands.entity(entity).remove::<Card>();
-            clicked_card_index.index = CARD_ROWS*CARD_COLS;
+            clicked_card_index.index = board_size;
         }
     }
-    destroy_card_index.index = CARD_ROWS*CARD_COLS;
+    destroy_card_index.index = board_size;
 
     if card_cnt.count > 2
     {
@@ -367,11 +467,28 @@ fn destroy_cards_system(mut commands: Commands,
             }
         
         }
-        switch_player(&mut player_index);
+        switch_player(&mut player_index,player_num.num);
         card_cnt.count = 0;
     }
+}
 
-    
+fn check_board_state(query_collected: Query<&Collected>,
+    board_size : Res<BoardSize>,
+    mut app_state: ResMut<State<AppState>>,
+    buttons: Res<Input<MouseButton>>)
+{
+    if buttons.just_pressed(MouseButton::Left)
+    {
+        let mut board_size = board_size.size.x as usize*board_size.size.y as usize;
+        for collected in query_collected.iter()
+        {
+            board_size -= 1;
+        }
+        if board_size == 0
+        {   
+            app_state.set(AppState::MainMenu).unwrap();
+        }
+    }
 }
 
 fn move_card_system(mut commands: Commands, 
@@ -432,7 +549,7 @@ fn select_card_system(mut query: Query<(&Card, &mut Sprite,Option<&Hovered>,Opti
     }
 }
 
-fn select_player_system(mut query: Query<(&mut Camera2d)>,
+fn select_player_system(mut query: Query<&mut Camera2d, (With<MainCamera>)>,
                         mut player_query:Query<(Entity, &MemoryPlayer)>,
                         mut player_index: ResMut<CurrentPlayerIndex>,
                         time: Res<Time>,
@@ -544,7 +661,7 @@ fn flip_card_system(
 fn cursor_state_system(mut q_cursor_state: Query<&mut CursorState>,
     mut cursor_evr: EventReader<CursorMoved>,
     windows: Res<Windows>,
-    q_camera: Query<&Transform, With<Camera>>
+    q_camera: Query<&Transform, With<MainCamera>>
 ) 
 {
     let window = windows.get_primary().unwrap();
@@ -575,8 +692,10 @@ fn hoverable(
     q_cursor_state: Query<& CursorState>,
     q_hoverable: Query<(Entity, &Transform, &Sprite, &Hoverable)>,
     destroy_card_index:Res<CardToBeDestroyed>,
+    board_size:Res<BoardSize>
 ) 
 {
+    
     for cursor_state in q_cursor_state.iter() {
 
         for (entity, transform, sprite, _) in q_hoverable.iter() {
@@ -588,7 +707,7 @@ fn hoverable(
                 && transform.translation.x + half_width > cursor_state.cursor_world.x
                 && transform.translation.y - half_height < cursor_state.cursor_world.y
                 && transform.translation.y + half_height > cursor_state.cursor_world.y
-                && destroy_card_index.index == CARD_ROWS * CARD_COLS
+                && destroy_card_index.index == (board_size.size.x as usize * board_size.size.y as usize)
             {
                 commands.entity(entity).insert(Hovered);
             } else {
@@ -598,7 +717,7 @@ fn hoverable(
     }
 }
 
-fn clickable(
+fn clickable_card(
     mut commands: Commands,
     q_hoverable: Query<(Entity, &Clickable,Option<&Clicked>,&Card,&Transform, &Sprite)>,
     buttons: Res<Input<MouseButton>>,
@@ -610,55 +729,59 @@ fn clickable(
     if buttons.just_pressed(MouseButton::Left)
     {
         for cursor_state in q_cursor_state.iter() {
-
-            println!(
-            "Clicked!"
-            );
             // Left button was pressed
-            for (entity, _, clicked,card,transform,sprite) in q_hoverable.iter() 
+            if 2 == card_cnt.count
             {
-                let wek:Vec2 = sprite.custom_size.unwrap();
-                let half_width = wek.x * 0.5;
-                let half_height = wek.y * 0.5;
-                if transform.translation.x - half_width < cursor_state.cursor_world.x
-                && transform.translation.x + half_width > cursor_state.cursor_world.x
-                && transform.translation.y - half_height < cursor_state.cursor_world.y
-                && transform.translation.y + half_height > cursor_state.cursor_world.y
+                card_cnt.count = card_cnt.count + 1;
+            }
+            else
+            {
+                for (entity, _, clicked,card,transform,sprite) in q_hoverable.iter() 
                 {
-                    if clicked.is_some()
+                    let wek:Vec2 = sprite.custom_size.unwrap();
+                    let half_width = wek.x * 0.5;
+                    let half_height = wek.y * 0.5;
+                    if transform.translation.x - half_width < cursor_state.cursor_world.x
+                    && transform.translation.x + half_width > cursor_state.cursor_world.x
+                    && transform.translation.y - half_height < cursor_state.cursor_world.y
+                    && transform.translation.y + half_height > cursor_state.cursor_world.y
                     {
-                        // card_cnt.count = card_cnt.count - 1;
-                        // commands.entity(entity).remove::<Clicked>();
-                    }
-                    else 
-                    {
-                        if 0 == card_cnt.count 
+                        if clicked.is_some()
                         {
-                            clicked_card_index.index = card.index;
-                        }
-
-                        if card_cnt.count < 2
-                        {
-                            card_cnt.count = card_cnt.count + 1;
-                            commands.entity(entity).insert(Clicked);
+                            // card_cnt.count = card_cnt.count - 1;
+                            // commands.entity(entity).remove::<Clicked>();
                         }
                         else 
                         {
-                            card_cnt.count = card_cnt.count + 1;
-                        }
-
-                        if 2 == card_cnt.count
-                        {
-                            if card.index == clicked_card_index.index
+                            if 0 == card_cnt.count 
                             {
-                                cards_to_be_destroyed.index = card.index;
+                                clicked_card_index.index = card.index;
+                            }
+
+                            if card_cnt.count < 2
+                            {
+                                card_cnt.count = card_cnt.count + 1;
+                                commands.entity(entity).insert(Clicked);
+                            }
+                            else 
+                            {
+                                card_cnt.count = card_cnt.count + 1;
+                            }
+
+                            if 2 == card_cnt.count
+                            {
+                                if card.index == clicked_card_index.index
+                                {
+                                    cards_to_be_destroyed.index = card.index;
+                                }
                             }
                         }
+                        
                     }
-                    
                 }
             }
         }
+        
     }
 }
 
@@ -700,13 +823,44 @@ fn cursor_to_world(window: &Window, cam_transform: &Transform, cursor_pos: Vec2)
     Vec2::new(out.x, out.y)
 }
 
-fn switch_player(player_index:&mut CurrentPlayerIndex)
+fn switch_player(player_index:&mut CurrentPlayerIndex, player_num:usize)
 {
     (*player_index).last_index = (*player_index).index;  
     (*player_index).index += 1;
-    if (*player_index).index >= PLAYER_NUM
+    if (*player_index).index >= player_num
     {
         (*player_index).index = 0;
     } 
     (*player_index).transition_time = 0.0;
+}
+
+fn clickable_button(
+    mut commands: Commands,
+    q_hoverable: Query<(Entity, &Clickable,Option<&Clicked> ,&Transform, &Sprite)>,
+    buttons: Res<Input<MouseButton>>,
+    q_cursor_state: Query<& CursorState>,
+) {
+    if buttons.just_pressed(MouseButton::Left)
+    {
+        for cursor_state in q_cursor_state.iter() {
+
+            println!(
+            "Clicked!"
+            );
+            // Left button was pressed
+            for (entity, _, clicked,transform,sprite) in q_hoverable.iter() 
+            {
+                let wek:Vec2 = sprite.custom_size.unwrap();
+                let half_width = wek.x * 0.5;
+                let half_height = wek.y * 0.5;
+                if transform.translation.x - half_width < cursor_state.cursor_world.x
+                && transform.translation.x + half_width > cursor_state.cursor_world.x
+                && transform.translation.y - half_height < cursor_state.cursor_world.y
+                && transform.translation.y + half_height > cursor_state.cursor_world.y
+                {
+                    
+                }
+            }
+        }
+    }
 }
