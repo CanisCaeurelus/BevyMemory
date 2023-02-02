@@ -28,6 +28,11 @@ struct Button24Cards;
 #[derive(Component)]
 struct Button30Cards;
 
+#[derive(Component)]
+struct PlayerNumberLabel;
+#[derive(Component)]
+struct CardNumberLabel;
+
 
 
 #[derive(Resource)]
@@ -38,7 +43,9 @@ struct UiAssets{
 }
 impl Plugin for GameMenuPlugin {
     fn build(&self, app: &mut App){
-        app.add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(handle_start_button))
+        app.add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(handle_start_button)
+    )
+
         .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup_menu))
         .add_system_set(SystemSet::on_exit(AppState::MainMenu).with_system(despawn_menu));
     }
@@ -100,7 +107,7 @@ fn setup_menu(mut commands: Commands, assets: Res<AssetServer>)
                             }),
                         );
 
-                        parent.spawn(
+                        parent.spawn((
                             TextBundle::from_section(
                                 "Number of players",
                                 TextStyle {
@@ -117,7 +124,7 @@ fn setup_menu(mut commands: Commands, assets: Res<AssetServer>)
                                 margin: UiRect::all(Val::Px(50.0)),
                                 ..default()
                             }),
-                        );
+                         PlayerNumberLabel));
                         parent
                     .spawn(NodeBundle {
                         style: Style {
@@ -351,7 +358,7 @@ fn setup_menu(mut commands: Commands, assets: Res<AssetServer>)
 
                     });
                     
-                        parent.spawn(
+                        parent.spawn((
                             TextBundle::from_section(
                                 "Number of cards",
                                 TextStyle {
@@ -368,7 +375,7 @@ fn setup_menu(mut commands: Commands, assets: Res<AssetServer>)
                                 margin: UiRect::all(Val::Px(50.0)),
                                 ..default()
                             }),
-                        );
+                            CardNumberLabel));
 
 
                         parent
@@ -667,7 +674,9 @@ fn handle_start_button(
     ui_assets: Res<UiAssets>,
     mut app_state: ResMut<State<AppState>>,
     mut num_of_players: ResMut<NumberOfPlayers>,
-    mut board_size: ResMut<BoardSize>
+    mut board_size: ResMut<BoardSize>,
+    mut player_label_query: Query<(&mut Text),(With<PlayerNumberLabel>, Without<CardNumberLabel>)>,
+    mut card_label_query: Query<(&mut Text),(With<CardNumberLabel>, Without<PlayerNumberLabel>)>,
     //ascii: Res<AsciiSheet>
 )
 {
@@ -743,7 +752,17 @@ fn handle_start_button(
                     app_state.set(AppState::InGame).unwrap();
                 }
                 image.0 = ui_assets.button_pressed.clone();
-                
+                for (mut text) in player_label_query.iter_mut()
+                {
+                    let some_value = num_of_players.num;
+                    text.sections[0].value = format!("Number of players: {some_value}");
+                }
+
+                for (mut text) in card_label_query.iter_mut()
+                {
+                    let some_value = board_size.size.x * board_size.size.y;
+                    text.sections[0].value = format!("Number of cards: {some_value}");
+                }
             }
             Interaction::Hovered =>
             {
@@ -756,6 +775,7 @@ fn handle_start_button(
         }
     }
 }
+
 
 fn despawn_menu(
     mut commands: Commands,

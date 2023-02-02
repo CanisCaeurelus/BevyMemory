@@ -7,6 +7,7 @@ use rand::{prelude::SliceRandom};
 
 use {core::f32::consts::PI};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
+use reqwest;
 
 mod game_menu;
 
@@ -363,7 +364,7 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size
             let card_offset_x: f32 = -450.0 + 100.0 * (10.0 - (card_cols as f32)) * 0.5;
             let card_offset_y: f32 = -450.0 + 100.0 * (10.0 - (card_rows as f32)) * 0.5;
             let pos = (card_offset_x + 100.0 * (i as f32), card_offset_y + 100.0 * (j as f32));
-            let transform = Transform::from_xyz(pos.0, pos.1, 0.0);
+            let transform = Transform::from_xyz(pos.0, pos.1, 1.0);
             let hue = 0.0;//rng.gen_range(0.0..=360.0);
             
             let entity = commands.spawn((
@@ -403,9 +404,22 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size
     
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>,) {
+    let background_image: Handle<Image> = asset_server.load("bakgrund.png");
+    let transform = Transform::from_xyz(0.0, 0.0, 0.0);
+
     commands.spawn((Camera2dBundle::default(),MainCamera));
     commands.spawn(CursorState{cursor_world:Vec2{x:0.0,y:0.0},cursor_moved:false});
+    commands.spawn(SpriteBundle {
+        sprite: Sprite {
+            custom_size: Some(Vec2::new(10.0, 10.0) * SPRITE_SIZE),
+            ..default()
+        },
+        texture: background_image.clone(),
+        transform: transform,
+
+        ..Default::default()
+    });
 }
 
 fn destroy_cards_system(mut commands: Commands, 
