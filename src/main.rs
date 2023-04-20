@@ -1,22 +1,21 @@
-//! This example displays each contributor to the bevy source code as a bouncing bevy-ball.
-
-use std::f32::consts::E;
-
 use bevy::{prelude::*};
 use rand::{prelude::SliceRandom};
 
 use {core::f32::consts::PI};
 use bevy::core_pipeline::clear_color::ClearColorConfig;
-use reqwest;
 
-mod game_menu;
+mod menus;
 
-use game_menu::GameMenuPlugin;
+use menus::game_menu::{GameMenuPlugin};
+use menus::high_score_screen::{HighScorePlugin};
+use menus::input_name::{NamePlugin};
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum AppState {
     MainMenu,
     InGame,
     Restart,
+    HighScore,
+    NameMenu,
 }
 
 fn main() {
@@ -24,6 +23,8 @@ fn main() {
 
         app.add_plugins(DefaultPlugins)
         .add_plugin(GameMenuPlugin)
+        .add_plugin(HighScorePlugin)
+        .add_plugin(NamePlugin)
         .add_startup_system(state_system)
         // add the app state type
         .add_state(AppState::MainMenu)
@@ -65,6 +66,14 @@ struct CardSelection {
 #[derive(Resource)]
 struct CardCount {
     count: u8,
+}
+
+#[derive(Resource)]
+struct GameScore {
+    player_name: String,
+    game_time: i32,
+    moves: i32,
+    locked: bool,
 }
 
 // impl Default for SelectionState {
@@ -147,8 +156,6 @@ const SATURATION_SELECTED: f32 = 0.0;
 const LIGHTNESS_SELECTED: f32 = 1.0;
 const ALPHA: f32 = 1.0;
 
-const SHOWCASE_TIMER_SECS: f32 = 3.0;
-
 const PLAYER_DISTANCE: f32 = 400.0;
 const PLAYER__HAND_DISTANCE: f32 = 80.0;
 
@@ -204,29 +211,19 @@ impl Clone for ImportedImageBack {
     }
 }
 
-fn state_system(mut commands:Commands,mut app_state: ResMut<State<AppState>>) {
+fn state_system(mut commands:Commands, time: Res<Time>,) {
     let num_of_players = NumberOfPlayers{num:1};
     let board_size = BoardSize { size: Vec2::new(4.0,5.0) };
+    let game_score= GameScore {
+        player_name: "".to_string(),
+        game_time: (time.raw_elapsed_seconds() * 1000.0) as i32,
+        moves: 0,
+        locked: false
+    };
+
     commands.insert_resource(num_of_players);
     commands.insert_resource(board_size);
-    // match app_state.current()
-    // {
-    //     AppState::MainMenu =>
-    //     {
-    //         //app_state.pop();
-    //         //app_state.set(AppState::InGame).unwrap();
-    //     }
-    //     AppState::InGame =>
-    //     {
-            
-    //     }
-    //     AppState::Restart =>
-    //     {
-            
-    //     }
-    // }
-    // // ^ this can fail if we are already in the target state
-    // // or if another state change is already queued
+    commands.insert_resource(game_score);
 }
 
 
@@ -279,24 +276,24 @@ fn setup_players(mut commands: Commands,asset_server:Res<AssetServer>, player_nu
 }
 
 fn despawn_scene(mut commands: Commands,    
-    mut player_query: Query<Entity, With<MemoryPlayer>>, 
-    mut card_query: Query<Entity, With<Card>>,
-    mut cam_query: Query<Entity, With<MainCamera>>,
-    mut cur_query: Query<Entity, With<CursorState>>)
+    player_query: Query<Entity, With<MemoryPlayer>>, 
+    card_query: Query<Entity, With<Card>>,
+    cam_query: Query<Entity, With<MainCamera>>,
+    cur_query: Query<Entity, With<CursorState>>)
 {
-    for (ent) in player_query.iter()
+    for ent in player_query.iter()
     {
         commands.entity(ent).despawn_recursive();
     }
-    for (ent) in card_query.iter()
+    for ent in card_query.iter()
     {
         commands.entity(ent).despawn_recursive();
     }
-    for (ent) in cam_query.iter()
+    for ent in cam_query.iter()
     {
         commands.entity(ent).despawn_recursive();
     }
-    for (ent) in cur_query.iter()
+    for ent in cur_query.iter()
     {
         commands.entity(ent).despawn_recursive();
     }
@@ -309,7 +306,8 @@ fn despawn_scene(mut commands: Commands,
     commands.remove_resource::<CurrentPlayer>();
 }
 
-fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size:Res<BoardSize>)
+fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size:Res<BoardSize>,    mut game_score: ResMut<GameScore>,
+    time: Res<Time>)
 {
     let card_cols = board_size.size.x as usize;
     let card_rows = board_size.size.y as usize;
@@ -345,7 +343,7 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size
         ];
         available_images.shuffle(&mut rng);
     let used_images:Vec<Handle<Image>> = available_images[0..(card_rows*card_cols/2)].to_vec();
-    let mut texture_handle_a:ImportedImagesFront = ImportedImagesFront{
+    let texture_handle_a:ImportedImagesFront = ImportedImagesFront{
         handles: used_images};
     let mut card_selection = CardSelection {
         order: Vec::with_capacity(card_rows*card_cols),
@@ -401,6 +399,13 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size
     commands.insert_resource(ImportedImageBack {
         handle: texture_handle,
     });
+    if(game_score.locked)
+    {
+        game_score.locked = false;
+        game_score.moves = 0;
+        game_score.game_time = (time.raw_elapsed_seconds() * 1000.0) as i32;
+    }
+
     
 }
 
@@ -428,13 +433,12 @@ fn destroy_cards_system(mut commands: Commands,
     mut clicked_card_index:ResMut<ClickedCardIndex>,
     mut card_cnt: ResMut<CardCount>,
     mut player_index: ResMut<CurrentPlayerIndex>,
-    mut player_query: Query<(&mut MemoryPlayer)>,
-    mut app_state: ResMut<State<AppState>>,
+    mut player_query: Query<&mut MemoryPlayer>,
     board_size: Res<BoardSize>,
     player_num:Res<NumberOfPlayers>
 ) {
     let board_size = board_size.size.x as usize * board_size.size.y as usize;
-    for (entity,card,_,mut trans) in query.iter_mut()
+    for (entity,card,_,trans) in query.iter_mut()
     {
         if card.index == destroy_card_index.index
         {
@@ -446,7 +450,7 @@ fn destroy_cards_system(mut commands: Commands,
             commands.entity(entity).remove::<Hoverable>();
             commands.entity(entity).insert(Collected);
             let player_radial_distance: f32 = 2.0*PI / (player_num.num as f32);
-            for (mut player) in player_query.iter_mut()
+            for mut player in player_query.iter_mut()
             {
                 if player_index.index == player.index
                 {
@@ -489,26 +493,43 @@ fn destroy_cards_system(mut commands: Commands,
 fn check_board_state(query_collected: Query<&Collected>,
     board_size : Res<BoardSize>,
     mut app_state: ResMut<State<AppState>>,
-    buttons: Res<Input<MouseButton>>)
+    buttons: Res<Input<MouseButton>>,
+    mut game_score: ResMut<GameScore>,
+    player_num:Res<NumberOfPlayers>,
+    time: Res<Time>,)
 {
-    if buttons.just_pressed(MouseButton::Left)
+
+    let mut board_size = board_size.size.x as usize*board_size.size.y as usize;
+    for _ in query_collected.iter()
     {
-        let mut board_size = board_size.size.x as usize*board_size.size.y as usize;
-        for collected in query_collected.iter()
+        board_size -= 1;
+    }
+    if board_size == 0
+    {   
+        if buttons.just_pressed(MouseButton::Left)
         {
-            board_size -= 1;
+            if game_score.player_name != "" || player_num.num != 1
+            {
+                app_state.set(AppState::HighScore).unwrap();
+            }
+            else 
+            {
+                app_state.set(AppState::NameMenu).unwrap();
+            }
         }
-        if board_size == 0
-        {   
-            app_state.set(AppState::MainMenu).unwrap();
+        if !game_score.locked
+        {
+            game_score.game_time = (time.raw_elapsed_seconds() * 1000.0) as i32 - game_score.game_time;
+            game_score.locked = true;
         }
     }
 }
 
+
 fn move_card_system(mut commands: Commands, 
     mut query: Query<(Entity,&mut MovedCard, &mut Transform,)>,
     timer: Res<Time>) {
-        let mut delta = timer.delta_seconds();
+        let delta = timer.delta_seconds();
         for (entity,mut moved_card,mut trans) in query.iter_mut()
         {
             moved_card.progression += delta;
@@ -563,11 +584,10 @@ fn select_card_system(mut query: Query<(&Card, &mut Sprite,Option<&Hovered>,Opti
     }
 }
 
-fn select_player_system(mut query: Query<&mut Camera2d, (With<MainCamera>)>,
-                        mut player_query:Query<(Entity, &MemoryPlayer)>,
+fn select_player_system(mut query: Query<&mut Camera2d, With<MainCamera>>,
+                        player_query:Query<(Entity, &MemoryPlayer)>,
                         mut player_index: ResMut<CurrentPlayerIndex>,
                         time: Res<Time>,
-                        mut current_player: ResMut<CurrentPlayer>,
 )
 {
     let delta = time.delta_seconds();
@@ -581,7 +601,7 @@ fn select_player_system(mut query: Query<&mut Camera2d, (With<MainCamera>)>,
         {
             if player.index == player_index.last_index
             {
-                colour = Color::rgb((player.colour.r() * (1.0-delta)),(player.colour.g() * (1.0-delta)),(player.colour.b() * (1.0-delta))) ;
+                colour = Color::rgb(player.colour.r() * (1.0-delta),player.colour.g() * (1.0-delta),player.colour.b() * (1.0-delta)) ;
             }
         }
     }
@@ -590,9 +610,9 @@ fn select_player_system(mut query: Query<&mut Camera2d, (With<MainCamera>)>,
         delta = 1.0;
     }
 
-    for(mut camera) in query.iter_mut()
+    for mut camera in query.iter_mut()
     {
-        for (entity,player) in player_query.iter()
+        for (_,player) in player_query.iter()
         {
             if player.index == player_index.index
             {
@@ -606,37 +626,13 @@ fn select_player_system(mut query: Query<&mut Camera2d, (With<MainCamera>)>,
         }
         
     }
-    for(mut camera) in query.iter_mut()
-    {
-    //camera.clear_color = ClearColorConfig::Custom(Color::rgb(0.1,0.8,0.1));
 }
-}
-
-// fn click_card_system(    mut commands: Commands,
-// mut query: Query<(Entity, &Card, &mut Sprite,Option<&Clicked>)>,
-// mut card_cnt: ResMut<CardCount>,
-// )
-// {
-//     for(entity, card, mut sprite, clicked) in query.iter_mut()
-//     {
-//         if clicked.is_some()
-//         {
-//             card_cnt.count = card_cnt.count + 1;
-//             if card_cnt.count > 2
-//             {
-//                 card_cnt.count = card_cnt.count - 1;
-//                 commands.entity(entity).remove::<Clicked>();
-//                 deselect_card(&mut sprite, card);
-//             }
-//         }
-//     }
-// }
 
 fn flip_card_system(
     mut query: Query<(Entity, Option<&Clicked>, &mut RotateCard, &mut Sprite, &mut Card, &mut Handle<Image>, Option<&Collected>)>,
     front_images : Res<ImportedImagesFront>,
     back_image : Res<ImportedImageBack>,
-    time: Res<Time>
+    time: Res<Time>,
     )
 {
     for (_, clicked, mut rotate, mut sprite, card, mut handle,collected) in query.iter_mut()
@@ -739,6 +735,7 @@ fn clickable_card(
     mut clicked_card_index: ResMut<ClickedCardIndex>,
     mut cards_to_be_destroyed: ResMut<CardToBeDestroyed>,
     q_cursor_state: Query<& CursorState>,
+    mut game_score: ResMut<GameScore>,
 ) {
     if buttons.just_pressed(MouseButton::Left)
     {
@@ -752,6 +749,7 @@ fn clickable_card(
             {
                 for (entity, _, clicked,card,transform,sprite) in q_hoverable.iter() 
                 {
+                    
                     let wek:Vec2 = sprite.custom_size.unwrap();
                     let half_width = wek.x * 0.5;
                     let half_height = wek.y * 0.5;
@@ -788,6 +786,7 @@ fn clickable_card(
                                 {
                                     cards_to_be_destroyed.index = card.index;
                                 }
+                                game_score.moves += 1;
                             }
                         }
                         
@@ -819,11 +818,6 @@ fn deselect_card(sprite: &mut Sprite, card: &Card)
     );
 }
 
-fn hide_card(sprite: &mut Transform)
-{
-    sprite.translation.x += 1500.0;
-}
-
 fn cursor_to_world(window: &Window, cam_transform: &Transform, cursor_pos: Vec2) -> Vec2 {
     // get the size of the window
     let size = Vec2::new(window.width() as f32, window.height() as f32);
@@ -846,35 +840,4 @@ fn switch_player(player_index:&mut CurrentPlayerIndex, player_num:usize)
         (*player_index).index = 0;
     } 
     (*player_index).transition_time = 0.0;
-}
-
-fn clickable_button(
-    mut commands: Commands,
-    q_hoverable: Query<(Entity, &Clickable,Option<&Clicked> ,&Transform, &Sprite)>,
-    buttons: Res<Input<MouseButton>>,
-    q_cursor_state: Query<& CursorState>,
-) {
-    if buttons.just_pressed(MouseButton::Left)
-    {
-        for cursor_state in q_cursor_state.iter() {
-
-            println!(
-            "Clicked!"
-            );
-            // Left button was pressed
-            for (entity, _, clicked,transform,sprite) in q_hoverable.iter() 
-            {
-                let wek:Vec2 = sprite.custom_size.unwrap();
-                let half_width = wek.x * 0.5;
-                let half_height = wek.y * 0.5;
-                if transform.translation.x - half_width < cursor_state.cursor_world.x
-                && transform.translation.x + half_width > cursor_state.cursor_world.x
-                && transform.translation.y - half_height < cursor_state.cursor_world.y
-                && transform.translation.y + half_height > cursor_state.cursor_world.y
-                {
-                    
-                }
-            }
-        }
-    }
 }
