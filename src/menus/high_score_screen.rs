@@ -7,6 +7,7 @@ pub struct HighScorePlugin;
 use crate::{AppState,MainCamera,NumberOfPlayers,BoardSize, GameScore};
 use super::macros;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ureq::{Agent, AgentBuilder,json,Error};
 use std::time::Duration;
 #[derive(Resource)]
@@ -330,6 +331,7 @@ fn despawn_high_score(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn get_high_scores(number_of_cards:i32, sort_by:String) -> Vec<Score>
 {
     let agent: Agent = ureq::AgentBuilder::new()
@@ -344,6 +346,13 @@ fn get_high_scores(number_of_cards:i32, sort_by:String) -> Vec<Score>
     return scores;
 }
 
+#[cfg(target_arch = "wasm32")]
+fn get_high_scores(_number_of_cards:i32, _sort_by:String) -> Vec<Score>
+{
+    Vec::new()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn get_body(agent:&Agent, number_of_cards:i32, sort_by:String) -> Result<String,ureq::Error>
 {    
     let s: String = format!("http://bevymemory.fly.dev/highscores/{}/{}",number_of_cards,sort_by).to_owned();
@@ -371,6 +380,7 @@ fn text_input(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn post_score(score: CreateEntryData) 
 {
     let agent: Agent = ureq::AgentBuilder::new()
@@ -397,4 +407,10 @@ fn post_score(score: CreateEntryData)
         Err(_) => { /* some kind of io/transport error */ }
     }
     
+}
+
+#[cfg(target_arch = "wasm32")]
+fn post_score(_score: CreateEntryData) 
+{
+    // HTTP not supported in WASM build
 }
