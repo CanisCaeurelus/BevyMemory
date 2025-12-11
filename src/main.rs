@@ -312,7 +312,7 @@ fn setup_cards(mut commands: Commands, asset_server: Res<AssetServer>,board_size
     let card_cols = board_size.size.x as usize;
     let card_rows = board_size.size.y as usize;
     let mut rng = rand::thread_rng();
-    let texture_handle = asset_server.load("rewersu.png");
+    let texture_handle = asset_server.load("memory_reverse.png");
     let mut available_images:[Handle<Image>; 21] = 
         [
             asset_server.load("icon0.png"),
